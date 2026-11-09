@@ -35,9 +35,6 @@
   textarea{min-height:72px;resize:vertical}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
   .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 10px}
-  .seg{display:flex;border:1px solid var(--garis);border-radius:10px;overflow:hidden}
-  .seg button{flex:1;padding:11px;border:0;background:#fff;font:inherit;color:var(--abu)}
-  .seg button.on{background:var(--hijau);color:#fff;font-weight:600}
   .calc{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-top:12px}
   .calc div{background:var(--hijau-muda);border-radius:10px;padding:9px 11px}
   .calc small{display:block;color:var(--abu);font-size:.75rem}
@@ -95,15 +92,10 @@
     <div class="body">
       <div class="grid2">
         <div><label class="f" for="tgl">Tanggal</label><input type="date" id="tgl"></div>
-        <div><label class="f" for="jam">Jam</label><input type="time" id="jam"></div>
+        <div><label class="f" for="jam">Jam <span class="opt">(24 jam)</span></label><input type="text" id="jam" inputmode="numeric" maxlength="5" placeholder="07:30" autocomplete="off"></div>
       </div>
       <label class="f" for="petugas">Nama petugas</label>
       <input type="text" id="petugas" autocomplete="name" placeholder="Nama lengkap">
-      <label class="f">Shift</label>
-      <div class="seg" id="shift">
-        <button type="button" data-v="Pagi">Pagi</button>
-        <button type="button" data-v="Sore">Sore</button>
-      </div>
     </div>
   </section>
 
@@ -177,7 +169,7 @@
 <div class="actions">
   <div class="in">
     <button type="button" class="btn" id="b-dl">Download PDF</button>
-    <button type="button" class="btn" id="b-share">Bagikan</button>
+    <button type="button" class="btn" id="b-share">Bagikan PDF</button>
     <button type="button" class="btn primary" id="b-drive" hidden>Simpan ke Drive</button>
   </div>
   <div class="status" id="status"></div>
@@ -264,7 +256,6 @@ function setStatus(msg,cls=""){ const s=$("status"); s.textContent=msg; s.classN
 
 const answers = {};          // itemId -> {status:'ok'|'no', note:'', photos:[dataURL]}
 const fotoUmum = [];         // dataURL
-let shift = "";
 let dirty = false, saved = false;
 
 /* ===== Render checklist ===== */
@@ -438,7 +429,7 @@ function validate(){
   const miss=[];
   if(!$("tgl").value) miss.push("tanggal");
   if(!$("petugas").value.trim()) miss.push("nama petugas");
-  if(!shift) miss.push("shift");
+  if(!jamValid()) miss.push("jam (format 24 jam, mis. 07:30 atau 16:45)");
   if(num("awal")==null) miss.push("ayam awal");
   if(num("pakan-kg")==null) miss.push("jumlah pakan (kg)");
   if(num("t-total")==null) miss.push("total telur");
@@ -458,9 +449,14 @@ function validate(){
 }
 
 /* ===== PDF ===== */
+function jamValid(){ return /^([01]\d|2[0-3]):[0-5]\d$/.test($("jam").value); }
+function waktu24(d){
+  const p=n=>String(n).padStart(2,"0");
+  return `${p(d.getDate())}/${p(d.getMonth()+1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
 function fileName(){
   const nama = ($("petugas").value.trim().split(/\s+/)[0]||"Petugas").replace(/[^A-Za-z0-9]/g,"");
-  return `Piket_${$("tgl").value}_${shift}_${nama}.pdf`;
+  return `Piket_${$("tgl").value}_${$("jam").value.replace(":","")}_${nama}.pdf`;
 }
 function tglPanjang(iso){
   const d = new Date(iso+"T00:00:00");
@@ -490,7 +486,7 @@ function buildPdf(){
     columnStyles:{0:{cellWidth:28,textColor:abu},1:{cellWidth:62},2:{cellWidth:28,textColor:abu}},
     body:[
       ["Tanggal", tglPanjang($("tgl").value), "Petugas", $("petugas").value.trim()],
-      ["Jam", $("jam").value || "-", "Shift", shift]
+      ["Jam", $("jam").value+" WIB", "Kandang", CONFIG.namaKandang]
     ]
   });
   y = doc.lastAutoTable.finalY + 4;
@@ -629,7 +625,7 @@ function buildPdf(){
   const n = doc.getNumberOfPages();
   for(let i=1;i<=n;i++){
     doc.setPage(i); doc.setFontSize(7.8); doc.setTextColor(150);
-    doc.text(`${fileName().replace(".pdf","")}  ·  dibuat ${new Date().toLocaleString("id-ID")}`, M, H-7);
+    doc.text(`${fileName().replace(".pdf","")}  ·  dibuat ${waktu24(new Date())}`, M, H-7);
     doc.text(`Hal. ${i}/${n}`, W-M, H-7, {align:"right"});
   }
   return doc;
@@ -661,7 +657,7 @@ $("b-share").onclick = async ()=>{
   const file = new File([doc.output("blob")], fileName(), {type:"application/pdf"});
   if(navigator.canShare && navigator.canShare({files:[file]})){
     try{
-      await navigator.share({files:[file], title:fileName(), text:`Laporan piket ${tglPanjang($("tgl").value)} (${shift})`});
+      await navigator.share({files:[file], title:fileName(), text:`Laporan piket ${tglPanjang($("tgl").value)}, jam ${$("jam").value}`});
       saved=true; setStatus("PDF dibagikan.", "okk");
     }catch(e){ if(e.name!=="AbortError") setStatus("Gagal membagikan: "+e.message,"err"); else setStatus(""); }
   }else{
@@ -678,7 +674,7 @@ $("b-drive").onclick = async ()=>{
     const res = await fetch(CONFIG.driveUrl, {
       method:"POST",
       body: JSON.stringify({ token:CONFIG.driveToken, filename:fileName(), tanggal:$("tgl").value, pdf:b64,
-        ringkas:{petugas:$("petugas").value.trim(), shift, ...c} })
+        ringkas:{petugas:$("petugas").value.trim(), jam:$("jam").value, ...c} })
     });
     const out = await res.json();
     if(!out.ok) throw new Error(out.error||"gagal");
@@ -697,10 +693,17 @@ function init(){
   $("petugas").value = store.get("petugas")||"";
   const akhirLalu = store.get("akhir_terakhir");
   if(akhirLalu) $("awal").placeholder = "Laporan terakhir di HP ini: "+akhirLalu;
-  shift = now.getHours()<12 ? "Pagi" : "Sore";
-  document.querySelectorAll("#shift button").forEach(b=>{
-    b.classList.toggle("on", b.dataset.v===shift);
-    b.onclick=()=>{ shift=b.dataset.v; document.querySelectorAll("#shift button").forEach(x=>x.classList.toggle("on",x===b)); markDirty(); };
+  // Jam selalu format 24 jam HH:MM (titik otomatis diganti titik dua)
+  $("jam").addEventListener("input", e=>{
+    let v = e.target.value.replace(/[^\d]/g,"").slice(0,4);
+    if(v.length>2) v = v.slice(0,2)+":"+v.slice(2);
+    e.target.value = v;
+  });
+  $("jam").addEventListener("blur", e=>{
+    const d = e.target.value.replace(/[^\d]/g,"");
+    if(d.length===3) e.target.value = "0"+d[0]+":"+d.slice(1);       // 715 -> 07:15
+    else if(d.length && d.length<=2) e.target.value = d.padStart(2,"0")+":00"; // 7 -> 07:00
+    e.target.style.borderColor = jamValid() ? "" : "#b3261e";
   });
   if(CONFIG.namaPeternakan) $("judul").textContent = CONFIG.namaPeternakan;
   $("subjudul").textContent = (CONFIG.namaPeternakan ? "Laporan piket harian · " : "") + CONFIG.namaKandang;
