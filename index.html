@@ -35,6 +35,10 @@
   textarea{min-height:72px;resize:vertical}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
   .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 10px}
+  .seg{display:flex;border:1px solid var(--garis);border-radius:10px;overflow:hidden;margin-bottom:8px}
+  .seg button{flex:1;padding:10px;border:0;background:#fff;font:inherit;font-size:.92rem;color:var(--abu)}
+  .seg button.on{background:var(--hijau);color:#fff;font-weight:600}
+  .seg button:disabled{color:#b8c0ba}
   .calc{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-top:12px}
   .calc div{background:var(--hijau-muda);border-radius:10px;padding:9px 11px}
   .calc small{display:block;color:var(--abu);font-size:.75rem}
@@ -94,8 +98,10 @@
         <div><label class="f" for="tgl">Tanggal</label><input type="date" id="tgl"></div>
         <div><label class="f" for="jam">Jam <span class="opt">(24 jam)</span></label><input type="text" id="jam" inputmode="numeric" maxlength="5" placeholder="07:30" autocomplete="off"></div>
       </div>
-      <label class="f" for="petugas">Nama petugas</label>
+      <label class="f" for="petugas">Petugas 1</label>
       <input type="text" id="petugas" autocomplete="name" placeholder="Nama lengkap">
+      <label class="f" for="petugas2">Petugas 2 <span class="opt">(kosongkan jika piket sendiri)</span></label>
+      <input type="text" id="petugas2" autocomplete="off" placeholder="Nama lengkap">
     </div>
   </section>
 
@@ -159,7 +165,11 @@
       <textarea id="tindakan"></textarea>
       <label class="f">Foto kondisi kandang</label>
       <div class="photos" id="foto-umum"></div>
-      <label class="f">Paraf petugas</label>
+      <label class="f">Paraf oleh</label>
+      <div class="seg" id="paraf-oleh">
+        <button type="button" data-v="1" class="on">Petugas 1</button>
+        <button type="button" data-v="2" disabled>Petugas 2</button>
+      </div>
       <div class="sigwrap"><canvas id="sig"></canvas><span class="hint" id="sighint">Tanda tangan di sini</span></div>
       <div class="bulk"><button type="button" class="link" id="sigclear">Hapus paraf</button></div>
     </div>
@@ -255,7 +265,8 @@ function toast(msg){ const t=$("toast"); t.textContent=msg; t.classList.add("sho
 function setStatus(msg,cls=""){ const s=$("status"); s.textContent=msg; s.className="status "+cls; }
 
 const answers = {};          // itemId -> {status:'ok'|'no', note:'', photos:[dataURL]}
-const fotoUmum = [];         // dataURL
+const fotoUmum = [];
+let parafOleh = "1";      // "1" | "2"         // dataURL
 let dirty = false, saved = false;
 
 /* ===== Render checklist ===== */
@@ -428,7 +439,7 @@ function markDirty(){ dirty=true; saved=false; }
 function validate(){
   const miss=[];
   if(!$("tgl").value) miss.push("tanggal");
-  if(!$("petugas").value.trim()) miss.push("nama petugas");
+  if(!$("petugas").value.trim()) miss.push("nama petugas 1");
   if(!jamValid()) miss.push("jam (format 24 jam, mis. 07:30 atau 16:45)");
   if(num("awal")==null) miss.push("ayam awal");
   if(num("pakan-kg")==null) miss.push("jumlah pakan (kg)");
@@ -455,7 +466,8 @@ function waktu24(d){
   return `${p(d.getDate())}/${p(d.getMonth()+1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 function fileName(){
-  const nama = ($("petugas").value.trim().split(/\s+/)[0]||"Petugas").replace(/[^A-Za-z0-9]/g,"");
+  const depan = v => (v.trim().split(/\s+/)[0]||"").replace(/[^A-Za-z0-9]/g,"");
+  const nama = [depan($("petugas").value)||"Petugas", depan($("petugas2").value)].filter(Boolean).join("-");
   return `Piket_${$("tgl").value}_${$("jam").value.replace(":","")}_${nama}.pdf`;
 }
 function tglPanjang(iso){
@@ -485,8 +497,9 @@ function buildPdf(){
     styles:{fontSize:9.5, cellPadding:1.3},
     columnStyles:{0:{cellWidth:28,textColor:abu},1:{cellWidth:62},2:{cellWidth:28,textColor:abu}},
     body:[
-      ["Tanggal", tglPanjang($("tgl").value), "Petugas", $("petugas").value.trim()],
-      ["Jam", $("jam").value+" WIB", "Kandang", CONFIG.namaKandang]
+      ["Tanggal", tglPanjang($("tgl").value), "Petugas 1", $("petugas").value.trim()],
+      ["Jam", $("jam").value+" WIB", "Petugas 2", $("petugas2").value.trim()||"-"],
+      ["Kandang", CONFIG.namaKandang, "", ""]
     ]
   });
   y = doc.lastAutoTable.finalY + 4;
@@ -587,7 +600,9 @@ function buildPdf(){
   if(y > H-45){ doc.addPage(); y=M; }
   const bx = W-M-62;
   doc.setFontSize(9.5); doc.setTextColor(...abu);
-  doc.text("Petugas piket,", bx, y+3);
+  const p2 = $("petugas2").value.trim();
+  const penandatangan = (parafOleh==="2" && p2) ? p2 : $("petugas").value.trim();
+  doc.text(p2 ? `Petugas ${parafOleh==="2"?2:1},` : "Petugas piket,", bx, y+3);
   if(sig.drawn){
     const img = sig.canvas.toDataURL("image/png");
     const r = sig.canvas.height/sig.canvas.width;
@@ -596,7 +611,7 @@ function buildPdf(){
   }
   doc.setDrawColor(150); doc.line(bx, y+31, bx+62, y+31);
   doc.setTextColor(31,36,33); doc.setFont("helvetica","bold");
-  doc.text($("petugas").value.trim(), bx, y+36);
+  doc.text(penandatangan, bx, y+36);
   doc.setFont("helvetica","normal");
 
   // Lampiran foto
@@ -643,6 +658,7 @@ function makePdf(){
   try{
     const doc = buildPdf();
     store.set("petugas", $("petugas").value.trim());
+    store.set("petugas2", $("petugas2").value.trim());
     const c = calc(); if(c.akhir!=null) store.set("akhir_terakhir", String(c.akhir));
     return doc;
   }catch(e){ console.error(e); setStatus("PDF gagal dibuat: "+e.message, "err"); return null; }
@@ -674,7 +690,7 @@ $("b-drive").onclick = async ()=>{
     const res = await fetch(CONFIG.driveUrl, {
       method:"POST",
       body: JSON.stringify({ token:CONFIG.driveToken, filename:fileName(), tanggal:$("tgl").value, pdf:b64,
-        ringkas:{petugas:$("petugas").value.trim(), jam:$("jam").value, ...c} })
+        ringkas:{petugas:$("petugas").value.trim(), petugas2:$("petugas2").value.trim(), parafOleh, jam:$("jam").value, ...c} })
     });
     const out = await res.json();
     if(!out.ok) throw new Error(out.error||"gagal");
@@ -691,6 +707,21 @@ function init(){
   $("tgl").value = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
   $("jam").value = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
   $("petugas").value = store.get("petugas")||"";
+  $("petugas2").value = store.get("petugas2")||"";
+  // Pilihan "Paraf oleh": Petugas 2 hanya aktif kalau namanya diisi
+  const segBtns = document.querySelectorAll("#paraf-oleh button");
+  const syncParaf = ()=>{
+    const ada2 = !!$("petugas2").value.trim();
+    segBtns[1].disabled = !ada2;
+    if(!ada2) parafOleh = "1";
+    segBtns.forEach(b=>b.classList.toggle("on", b.dataset.v===parafOleh));
+    segBtns[0].textContent = "Petugas 1" + ($("petugas").value.trim() ? " · "+$("petugas").value.trim().split(/\s+/)[0] : "");
+    segBtns[1].textContent = "Petugas 2" + (ada2 ? " · "+$("petugas2").value.trim().split(/\s+/)[0] : "");
+  };
+  segBtns.forEach(b=>b.onclick=()=>{ if(b.disabled) return; parafOleh=b.dataset.v; syncParaf(); markDirty(); });
+  $("petugas").addEventListener("input", syncParaf);
+  $("petugas2").addEventListener("input", syncParaf);
+  syncParaf();
   const akhirLalu = store.get("akhir_terakhir");
   if(akhirLalu) $("awal").placeholder = "Laporan terakhir di HP ini: "+akhirLalu;
   // Jam selalu format 24 jam HH:MM (titik otomatis diganti titik dua)
